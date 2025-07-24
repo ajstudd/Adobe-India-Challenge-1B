@@ -1,0 +1,85 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Adobe Hackathon 1B Output Schema",
+  "type": "object",
+  "required": ["metadata", "extracted_sections", "subsection_analysis"],
+  "properties": {
+    "metadata": {
+      "type": "object",
+      "required": ["input_documents", "persona", "job_to_be_done", "processing_timestamp"],
+      "properties": {
+        "input_documents": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "description": "File names of PDFs processed"
+          }
+        },
+        "persona": {
+          "type": "string",
+          "description": "Role or identity of the user"
+        },
+        "job_to_be_done": {
+          "type": "string",
+          "description": "Primary task or use case"
+        },
+        "processing_timestamp": {
+          "type": "string",
+          "format": "date-time",
+          "description": "ISO 8601 timestamp when processing was done"
+        }
+      }
+    },
+    "extracted_sections": {
+      "type": "array",
+      "description": "Top-ranked section titles based on persona-task embedding similarity",
+      "items": {
+        "type": "object",
+        "required": ["document", "section_title", "importance_rank", "page_number"],
+        "properties": {
+          "document": {
+            "type": "string",
+            "description": "Name of the source PDF file"
+          },
+          "section_title": {
+            "type": "string",
+            "description": "Title or heading of the relevant section"
+          },
+          "importance_rank": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Rank based on similarity (1 = most relevant)"
+          },
+          "page_number": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Page where the section appears"
+          }
+        }
+      }
+    },
+    "subsection_analysis": {
+      "type": "array",
+      "description": "Highly relevant paragraph-level insights based on the persona-task query",
+      "items": {
+        "type": "object",
+        "required": ["document", "refined_text", "page_number"],
+        "properties": {
+          "document": {
+            "type": "string",
+            "description": "PDF file from which the paragraph was extracted"
+          },
+          "refined_text": {
+            "type": "string",
+            "description": "Semantic content (paragraph, instruction, etc.) relevant to the task"
+          },
+          "page_number": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Page number in the document"
+          }
+        }
+      }
+    }
+  }
+}
