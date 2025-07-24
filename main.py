@@ -16,17 +16,14 @@ from utils import setup_logging, validate_input, ensure_directories
 
 def main():
     """Main execution function"""
-    # Setup logging
     setup_logging()
     logger = logging.getLogger(__name__)
     
     logger.info("Starting Adobe Hackathon 1B Document Analysis System")
     
     try:
-        # Ensure required directories exist
         ensure_directories()
         
-        # Load input configuration
         input_path = Path("inputs/input.json")
         if not input_path.exists():
             raise FileNotFoundError(f"Input file not found: {input_path}")
@@ -34,17 +31,16 @@ def main():
         with open(input_path, 'r', encoding='utf-8') as f:
             input_data = json.load(f)
         
-        # Validate input
         validate_input(input_data)
         
-        # Extract persona and task
-        persona = input_data.get('persona', '')
-        task = input_data.get('task', '')
+        persona = input_data.get('persona', {}).get('role', '')
+        task = input_data.get('job_to_be_done', {}).get('task', '')
         documents = input_data.get('documents', [])
+        challenge_info = input_data.get('challenge_info', {})
         
         logger.info(f"Processing {len(documents)} documents for persona: {persona}")
+        logger.info(f"Challenge: {challenge_info.get('test_case_name', 'Unknown')}")
         
-        # Initialize components
         pdf_parser = PDFParser()
         embedding_model = EmbeddingModel()
         ranker = DocumentRanker(embedding_model)
@@ -93,7 +89,6 @@ def main():
             "subsection_analysis": subsection_analysis
         }
         
-        # Write output
         output_path = Path("outputs/output.json")
         with open(output_path, 'w', encoding='utf-8') as f:
             json.dump(output_data, f, indent=2, ensure_ascii=False)
@@ -101,11 +96,11 @@ def main():
         logger.info(f"Results written to: {output_path}")
         logger.info(f"Extracted {len(extracted_sections)} sections and {len(subsection_analysis)} subsections")
         
-        print(f"✅ Processing complete! Results saved to {output_path}")
+        print(f"Processing complete! Results saved to {output_path}")
         
     except Exception as e:
         logger.error(f"Error during execution: {e}")
-        print(f"❌ Error: {e}")
+        print(f"Error: {e}")
         sys.exit(1)
 
 if __name__ == "__main__":

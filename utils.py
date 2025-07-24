@@ -31,7 +31,7 @@ def setup_logging(level: int = logging.INFO, log_file: str = None):
     root_logger.setLevel(level)
     root_logger.addHandler(console_handler)
     
-    # Optionally add file handler
+    # add file handler
     if log_file:
         file_handler = logging.FileHandler(log_file)
         file_handler.setFormatter(formatter)
@@ -59,12 +59,22 @@ def validate_input(input_data: Dict[str, Any]) -> bool:
     Returns:
         True if valid, raises ValueError if invalid
     """
-    required_fields = ['persona', 'task', 'documents']
+    required_fields = ['challenge_info', 'documents', 'persona', 'job_to_be_done']
     
     for field in required_fields:
         if field not in input_data:
             raise ValueError(f"Missing required field: {field}")
     
+    # Validate challenge_info
+    if not isinstance(input_data['challenge_info'], dict):
+        raise ValueError("'challenge_info' field must be a dictionary")
+    
+    challenge_required = ['challenge_id', 'test_case_name', 'description']
+    for field in challenge_required:
+        if field not in input_data['challenge_info']:
+            raise ValueError(f"Missing required field in challenge_info: {field}")
+    
+    # Validate documents
     if not isinstance(input_data['documents'], list):
         raise ValueError("'documents' field must be a list")
     
@@ -78,6 +88,23 @@ def validate_input(input_data: Dict[str, Any]) -> bool:
         
         if 'filename' not in doc:
             raise ValueError(f"Document {i} missing 'filename' field")
+        
+        if 'title' not in doc:
+            raise ValueError(f"Document {i} missing 'title' field")
+    
+    # Validate persona
+    if not isinstance(input_data['persona'], dict):
+        raise ValueError("'persona' field must be a dictionary")
+    
+    if 'role' not in input_data['persona']:
+        raise ValueError("Missing 'role' field in persona")
+    
+    # Validate job_to_be_done
+    if not isinstance(input_data['job_to_be_done'], dict):
+        raise ValueError("'job_to_be_done' field must be a dictionary")
+    
+    if 'task' not in input_data['job_to_be_done']:
+        raise ValueError("Missing 'task' field in job_to_be_done")
     
     return True
 
@@ -127,7 +154,6 @@ def clean_text(text: str) -> str:
     if not text:
         return ""
     
-    # Remove excessive whitespace
     cleaned = " ".join(text.split())
     
     # Remove common artifacts
@@ -195,18 +221,27 @@ def create_sample_input(output_path: str = "inputs/input.json"):
         output_path: Path to save sample input
     """
     sample_input = {
-        "persona": "Financial Analyst",
-        "task": "Analyze Q2 2024 financial performance and identify key trends",
+        "challenge_info": {
+            "challenge_id": "round_1b_003",
+            "test_case_name": "create_manageable_forms",
+            "description": "Creating manageable forms"
+        },
         "documents": [
             {
-                "filename": "company_report_q2_2024.pdf",
-                "type": "financial_report"
+                "filename": "sample_financial_report.pdf",
+                "title": "Sample Financial Report"
             },
             {
-                "filename": "market_analysis_2024.pdf",
-                "type": "market_analysis"
+                "filename": "market_analysis.pdf",
+                "title": "Market Analysis Report"
             }
-        ]
+        ],
+        "persona": {
+            "role": "Financial Analyst"
+        },
+        "job_to_be_done": {
+            "task": "Analyze Q2 2024 financial performance and identify key trends"
+        }
     }
     
     save_json(sample_input, output_path)
@@ -225,7 +260,6 @@ def print_system_info():
     print("=========================")
 
 if __name__ == "__main__":
-    # Create sample input for testing
     ensure_directories()
     create_sample_input()
     print_system_info()

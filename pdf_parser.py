@@ -34,6 +34,8 @@ class PDFParser:
         chunks = []
         
         try:
+            document_name = Path(pdf_path).name
+            
             doc = fitz.open(pdf_path)
             self.logger.info(f"Opened PDF: {pdf_path} ({len(doc)} pages)")
             
@@ -57,7 +59,8 @@ class PDFParser:
                                         "type": chunk_type,
                                         "text": text,
                                         "page": page_num + 1,
-                                        "font_size": round(font_size, 1)
+                                        "font_size": round(font_size, 1),
+                                        "document": document_name
                                     }
                                     chunks.append(chunk)
             
@@ -109,7 +112,6 @@ class PDFParser:
         if len(text) < 100 and (text.endswith(':') or (not text.endswith('.') and text[0].isupper())):
             return "heading"
         
-        # Everything else is a paragraph
         return "paragraph"
     
     def _final_classify(self, text: str) -> str:
@@ -139,7 +141,6 @@ class PDFParser:
         if any(starter in ' '.join(first_words) for starter in heading_starters):
             return "heading"
         
-        # Default to paragraph for longer text
         return "paragraph"
     
     def _post_process_chunks(self, chunks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -169,6 +170,7 @@ class PDFParser:
             if (current_chunk and 
                 current_chunk["type"] == chunk["type"] and 
                 current_chunk["page"] == chunk["page"] and
+                current_chunk.get("document") == chunk.get("document") and
                 abs(current_chunk["font_size"] - chunk["font_size"]) < 1.0 and
                 chunk["type"] == "paragraph"):  # Only merge paragraphs, keep headings separate
                 

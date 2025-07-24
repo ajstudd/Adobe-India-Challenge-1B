@@ -39,19 +39,130 @@ class DocumentRanker:
             self.logger.warning("No chunks to rank")
             return [], []
         
-        # Separate headings and paragraphs
         headings = [chunk for chunk in chunks if chunk.get('type') == 'heading']
         paragraphs = [chunk for chunk in chunks if chunk.get('type') == 'paragraph']
         
         self.logger.info(f"Ranking {len(headings)} headings and {len(paragraphs)} paragraphs")
         
         # Rank headings for extracted_sections
-        extracted_sections = self._rank_chunk_type(query, headings, top_sections)
+        extracted_sections = self._rank_headings(query, headings, top_sections)
         
         # Rank paragraphs for subsection_analysis
-        subsection_analysis = self._rank_chunk_type(query, paragraphs, top_subsections)
+        subsection_analysis = self._rank_paragraphs(query, paragraphs, top_subsections)
         
         return extracted_sections, subsection_analysis
+    
+    def _rank_headings(self, query: str, headings: List[Dict[str, Any]], 
+                      top_k: int) -> List[Dict[str, Any]]:
+        """
+        Rank heading chunks for extracted_sections output format.
+        
+        Args:
+            query: Search query
+            headings: List of heading chunks to rank
+            top_k: Number of top chunks to return
+            
+        Returns:
+            List of top-k ranked headings in output schema format
+        """
+        if not headings:
+            return []
+        
+        try:
+            texts = [chunk['text'] for chunk in headings]
+            
+            # Generate embeddings for query and chunks
+            query_embedding = self.embedding_model.encode_single(query)
+            chunk_embeddings = self.embedding_model.encode(texts)
+            
+            # Calculate cosine similarities
+            similarities = cosine_similarity(
+                query_embedding.reshape(1, -1), 
+                chunk_embeddings
+            )[0]
+            
+            # Create ranked results
+            ranked_chunks = []
+            for i, similarity in enumerate(similarities):
+                chunk = headings[i].copy()
+                chunk['similarity'] = float(similarity)
+                ranked_chunks.append(chunk)
+            
+            # Sort by similarity score (descending)
+            ranked_chunks.sort(key=lambda x: x['similarity'], reverse=True)
+            
+            # Return top-k results in schema format
+            result = []
+            for rank, chunk in enumerate(ranked_chunks[:top_k], 1):
+                result.append({
+                    'document': chunk.get('document', 'unknown.pdf'),
+                    'section_title': chunk['text'],
+                    'importance_rank': rank,
+                    'page_number': chunk['page']
+                })
+            
+            self.logger.debug(f"Ranked {len(headings)} headings, returning top {len(result)}")
+            return result
+            
+        except Exception as e:
+            self.logger.error(f"Error ranking headings: {e}")
+            return []
+    
+    def _rank_paragraphs(self, query: str, paragraphs: List[Dict[str, Any]], 
+                        top_k: int) -> List[Dict[str, Any]]:
+        """
+        Rank paragraph chunks for subsection_analysis output format.
+        
+        Args:
+            query: Search query
+            paragraphs: List of paragraph chunks to rank
+            top_k: Number of top chunks to return
+            
+        Returns:
+            List of top-k ranked paragraphs in output schema format
+        """
+        if not paragraphs:
+            return []
+        
+        try:
+            # Extract text content
+            texts = [chunk['text'] for chunk in paragraphs]
+            
+            # Generate embeddings for query and chunks
+            query_embedding = self.embedding_model.encode_single(query)
+            chunk_embeddings = self.embedding_model.encode(texts)
+            
+            # Calculate cosine similarities
+            similarities = cosine_similarity(
+                query_embedding.reshape(1, -1), 
+                chunk_embeddings
+            )[0]
+            
+            # Create ranked results
+            ranked_chunks = []
+            for i, similarity in enumerate(similarities):
+                chunk = paragraphs[i].copy()
+                chunk['similarity'] = float(similarity)
+                ranked_chunks.append(chunk)
+            
+            # Sort by similarity score (descending)
+            ranked_chunks.sort(key=lambda x: x['similarity'], reverse=True)
+            
+            # Return top-k results in schema format
+            result = []
+            for chunk in ranked_chunks[:top_k]:
+                result.append({
+                    'document': chunk.get('document', 'unknown.pdf'),
+                    'refined_text': chunk['text'],
+                    'page_number': chunk['page']
+                })
+            
+            self.logger.debug(f"Ranked {len(paragraphs)} paragraphs, returning top {len(result)}")
+            return result
+            
+        except Exception as e:
+            self.logger.error(f"Error ranking paragraphs: {e}")
+            return []
     
     def _rank_chunk_type(self, query: str, chunks: List[Dict[str, Any]], 
                         top_k: int) -> List[Dict[str, Any]]:
