@@ -59,14 +59,15 @@ pids
 *.seed
 *.pid.lock
 
-# Models
-models/*/
+# Models (large files, downloaded during Docker build)
+models/
+!models/.gitkeep
 
-# Input documents
-inputs/docs/*.pdf
+# Input documents (updated paths)
+input/PDFs/*.pdf
 
-# Output files
-outputs/*.json
+# Output files (updated paths)
+output/*.json
 
 # OS generated files
 .DS_Store
@@ -79,3 +80,9 @@ Thumbs.db
 
 # Docker
 .dockerignore
+
+input/
+!input/.gitkeep
+
+output/
+!output/.gitkeep

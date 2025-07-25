@@ -40,9 +40,9 @@ def setup_logging(level: int = logging.INFO, log_file: str = None):
 def ensure_directories():
     """Ensure required directories exist"""
     directories = [
-        "inputs",
-        "inputs/docs",
-        "outputs",
+        "input",
+        "input/PDFs",
+        "output",
         "models"
     ]
     

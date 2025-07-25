@@ -24,7 +24,7 @@ def main():
     try:
         ensure_directories()
         
-        input_path = Path("inputs/input.json")
+        input_path = Path("input/input.json")
         if not input_path.exists():
             raise FileNotFoundError(f"Input file not found: {input_path}")
         
@@ -48,7 +48,7 @@ def main():
         all_chunks = []
         processed_docs = []
         for doc_info in documents:
-            doc_path = Path("inputs/docs") / doc_info.get('filename', '')
+            doc_path = Path("input/PDFs") / doc_info.get('filename', '')
             if doc_path.exists():
                 logger.info(f"Processing document: {doc_path}")
                 chunks = pdf_parser.parse_pdf(str(doc_path))
@@ -59,13 +59,13 @@ def main():
         
         if not all_chunks:
             logger.error("No valid documents found to process")
-            logger.info("Available files in inputs/docs:")
-            docs_dir = Path("inputs/docs")
+            logger.info("Available files in input/PDFs:")
+            docs_dir = Path("input/PDFs")
             if docs_dir.exists():
                 for file in docs_dir.iterdir():
                     logger.info(f"  - {file.name}")
             else:
-                logger.info("  inputs/docs directory does not exist")
+                logger.info("  input/PDFs directory does not exist")
             raise ValueError("No valid documents found to process")
         
         query = f"{persona}: {task}"
@@ -101,7 +101,7 @@ def main():
             "subsection_analysis": subsection_analysis
         }
         
-        output_path = Path("outputs/output.json")
+        output_path = Path("output/output.json")
         with open(output_path, 'w', encoding='utf-8') as f:
             json.dump(output_data, f, indent=2, ensure_ascii=False)
         
