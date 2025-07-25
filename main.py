@@ -45,7 +45,6 @@ def main():
         embedding_model = EmbeddingModel()
         ranker = DocumentRanker(embedding_model)
         
-        # Parse all PDFs and extract chunks
         all_chunks = []
         processed_docs = []
         for doc_info in documents:
@@ -69,14 +68,27 @@ def main():
                 logger.info("  inputs/docs directory does not exist")
             raise ValueError("No valid documents found to process")
         
-        # Create query from persona and task
         query = f"{persona}: {task}"
         logger.info(f"Query: {query}")
         
-        # Rank and extract relevant sections
-        extracted_sections, subsection_analysis = ranker.rank_chunks(query, all_chunks)
+        # Configuration - optimized for balanced output
+        # Automatically determining optimal parameters for comprehensive coverage
+        min_similarity = 0.32  # Slightly lower limit for better paragraph coverage
+        max_sections = min(25, len(all_chunks) // 6)  
+        max_subsections = min(15, len(all_chunks) // 8)
         
-        # Prepare output with metadata
+        # Ensure minimum useful output even for small document sets
+        max_sections = max(5, max_sections)
+        max_subsections = max(8, max_subsections)
+        
+        logger.info(f"Quality-optimized config: min_similarity={min_similarity}, max_sections={max_sections}, max_subsections={max_subsections}")
+        logger.info(f"Total chunks extracted: {len(all_chunks)}")
+        
+        # Rank and extract relevant sections
+        extracted_sections, subsection_analysis = ranker.rank_chunks(
+            query, all_chunks, min_similarity, max_sections, max_subsections
+        )
+        
         from datetime import datetime
         output_data = {
             "metadata": {

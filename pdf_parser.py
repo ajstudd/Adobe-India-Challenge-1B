@@ -42,39 +42,190 @@ class PDFParser:
             for page_num in range(len(doc)):
                 page = doc[page_num]
                 
-                # Get text blocks with formatting information
-                blocks = page.get_text("dict")
-                
-                for block in blocks["blocks"]:
-                    if "lines" in block:
-                        for line in block["lines"]:
-                            for span in line["spans"]:
-                                text = span["text"].strip()
-                                font_size = span["size"]
-                                
-                                if text and len(text) > 3:  # Filter out very short text
-                                    chunk_type = self._classify_text_type(text, font_size)
-                                    
-                                    chunk = {
-                                        "type": chunk_type,
-                                        "text": text,
-                                        "page": page_num + 1,
-                                        "font_size": round(font_size, 1),
-                                        "document": document_name
-                                    }
-                                    chunks.append(chunk)
+                page_chunks = self._extract_quality_chunks(page, page_num + 1, document_name)
+                chunks.extend(page_chunks)
             
             doc.close()
             
-            # Post-process chunks to merge fragments and clean up
-            processed_chunks = self._post_process_chunks(chunks)
+            processed_chunks = self._enhance_chunk_quality(chunks)
             
-            self.logger.info(f"Extracted {len(processed_chunks)} chunks from {pdf_path}")
+            self.logger.info(f"Extracted {len(processed_chunks)} high-quality chunks from {pdf_path}")
             return processed_chunks
             
         except Exception as e:
             self.logger.error(f"Error parsing PDF {pdf_path}: {e}")
             return []
+    
+    def _extract_quality_chunks(self, page, page_num: int, document_name: str) -> List[Dict[str, Any]]:
+        """
+        Extract high-quality, complete text chunks from a page.
+        Focus on complete sentences and coherent paragraphs.
+        """
+        chunks = []
+        
+        # Get text with better paragraph structure
+        text_dict = page.get_text("dict")
+        
+        current_paragraph = []
+        current_font_size = 0
+        paragraph_count = 0
+        
+        for block in text_dict["blocks"]:
+            if "lines" in block:
+                for line in block["lines"]:
+                    line_text = ""
+                    line_font_sizes = []
+                    
+                    for span in line["spans"]:
+                        text = span["text"].strip()
+                        if text:
+                            line_text += text + " "
+                            line_font_sizes.append(span["size"])
+                    
+                    if line_text.strip():
+                        avg_font_size = sum(line_font_sizes) / len(line_font_sizes) if line_font_sizes else 12
+                        
+                        # Check if this is likely a new paragraph/section
+                        if self._is_paragraph_break(line_text, avg_font_size, current_font_size):
+                            # Save previous paragraph if it exists
+                            if current_paragraph:
+                                paragraph_text = " ".join(current_paragraph).strip()
+                                if self._is_quality_content(paragraph_text):
+                                    chunk_type = self._classify_text_type(paragraph_text, current_font_size)
+                                    chunks.append({
+                                        "type": chunk_type,
+                                        "text": paragraph_text,
+                                        "page": page_num,
+                                        "font_size": round(current_font_size, 1),
+                                        "document": document_name
+                                    })
+                            
+                            current_paragraph = [line_text.strip()]
+                            current_font_size = avg_font_size
+                            paragraph_count += 1
+                        else:
+                            # Continue current paragraph
+                            current_paragraph.append(line_text.strip())
+                            current_font_size = avg_font_size
+        
+        if current_paragraph:
+            paragraph_text = " ".join(current_paragraph).strip()
+            if self._is_quality_content(paragraph_text):
+                chunk_type = self._classify_text_type(paragraph_text, current_font_size)
+                chunks.append({
+                    "type": chunk_type,
+                    "text": paragraph_text,
+                    "page": page_num,
+                    "font_size": round(current_font_size, 1),
+                    "document": document_name
+                })
+        
+        return chunks
+    
+    def _is_paragraph_break(self, line_text: str, font_size: float, prev_font_size: float) -> bool:
+        """
+        Determine if this line represents a paragraph break.
+        """
+        if prev_font_size == 0:
+            return True
+        
+        if abs(font_size - prev_font_size) > 1.5:
+            return True
+        
+        # Line starts with bullet points or numbers
+        if line_text.startswith(('•', '▪', '1.', '2.', '3.', '4.', '5.', 'a)', 'b)', 'c)')):
+            return True
+        
+        # Line is very short and might be a heading
+        if len(line_text) < 80 and line_text.endswith((':')) and not line_text.endswith('.'):
+            return True
+        
+        return False
+    
+    def _is_quality_content(self, text: str) -> bool:
+        """
+        Check if the text content is of sufficient quality for extraction.
+        """
+        text = text.strip()
+        
+        # Minimum length requirement
+        if len(text) < 20:
+            return False
+        
+        # Must contain some alphabetic characters
+        if sum(c.isalpha() for c in text) < len(text) * 0.5:
+            return False
+        
+        # Skip content that's mostly symbols or numbers
+        if text.count('.') > 5 or text.count('_') > 5:
+            return False
+        
+        # Check for meaningful content indicators
+        meaningful_words = ['the', 'and', 'to', 'of', 'for', 'with', 'can', 'you', 'is', 'are', 'in', 'on', 'at']
+        word_count = len(text.split())
+        meaningful_count = sum(1 for word in text.lower().split() if word in meaningful_words)
+        
+        # Should have reasonable ratio of meaningful words
+        if word_count > 5 and meaningful_count / word_count < 0.1:
+            return False
+        
+        return True
+    
+    def _enhance_chunk_quality(self, chunks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        Enhanced post-processing to improve chunk quality and coherence.
+        """
+        if not chunks:
+            return []
+        
+        enhanced_chunks = []
+        
+        # Remove duplicates and very similar content
+        seen_texts = set()
+        
+        for chunk in chunks:
+            text = chunk["text"].strip()
+            
+            # Skip if we've seen very similar content
+            text_normalized = text.lower().replace(" ", "").replace("\n", "")
+            if text_normalized in seen_texts:
+                continue
+            
+            # Final quality check
+            if self._is_quality_content(text) and len(text) >= 30:
+                cleaned_text = self._clean_extracted_text(text)
+                if cleaned_text and len(cleaned_text) >= 20:
+                    chunk["text"] = cleaned_text
+                    enhanced_chunks.append(chunk)
+                    seen_texts.add(text_normalized)
+        
+        return enhanced_chunks
+    
+    def _clean_extracted_text(self, text: str) -> str:
+        """
+        Clean and improve extracted text quality.
+        """
+        import re
+        
+        # Remove extra whitespace
+        text = " ".join(text.split())
+        
+        # Fix common OCR issues
+        text = text.replace("fi", "fi").replace("fl", "fl")
+        
+        # Remove trailing incomplete sentences if they don't end properly
+        sentences = text.split('.')
+        if len(sentences) > 1 and len(sentences[-1].strip()) < 10:
+            text = '.'.join(sentences[:-1]) + '.'
+        
+        # Ensure proper sentence ending
+        if text and not text.endswith(('.', '!', '?', ':')):
+            # If it looks like an incomplete sentence, don't add period
+            words = text.split()
+            if len(words) > 3 and text[-1].isalpha():
+                text += '.'
+        
+        return text.strip()
     
     def _classify_text_type(self, text: str, font_size: float) -> str:
         """
@@ -172,30 +323,25 @@ class PDFParser:
                 current_chunk["page"] == chunk["page"] and
                 current_chunk.get("document") == chunk.get("document") and
                 abs(current_chunk["font_size"] - chunk["font_size"]) < 1.0 and
-                chunk["type"] == "paragraph"):  # Only merge paragraphs, keep headings separate
+                chunk["type"] == "paragraph"):
                 
-                # Merge with current chunk if it's a paragraph
                 current_chunk["text"] += " " + text
             else:
-                # Start new chunk
                 if current_chunk:
-                    # Final classification check
                     final_text = current_chunk["text"].strip()
-                    if len(final_text) >= 10:  # Only keep substantial chunks
+                    if len(final_text) >= 10:
                         # Re-classify based on final merged text
                         current_chunk["type"] = self._final_classify(final_text)
                         processed.append(current_chunk)
                 
                 current_chunk = chunk.copy()
         
-        # Add the last chunk
         if current_chunk:
             final_text = current_chunk["text"].strip()
             if len(final_text) >= 10:
                 current_chunk["type"] = self._final_classify(final_text)
                 processed.append(current_chunk)
         
-        # Remove duplicates and very similar chunks
         final_chunks = self._remove_duplicates(processed)
         
         return final_chunks

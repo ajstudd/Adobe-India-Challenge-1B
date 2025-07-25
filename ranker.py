@@ -22,15 +22,17 @@ class DocumentRanker:
         self.logger = logging.getLogger(__name__)
     
     def rank_chunks(self, query: str, chunks: List[Dict[str, Any]], 
-                   top_sections: int = 5, top_subsections: int = 5) -> Tuple[List[Dict], List[Dict]]:
+                   min_similarity: float = 0.3, max_sections: int = 50, max_subsections: int = 50) -> Tuple[List[Dict], List[Dict]]:
         """
-        Rank document chunks based on semantic similarity to query.
+        Intelligently rank and extract document chunks based on semantic similarity.
+        Automatically determines the optimal amount of content to extract.
         
         Args:
             query: Search query (persona + task)
             chunks: List of document chunks with metadata
-            top_sections: Number of top heading chunks to return
-            top_subsections: Number of top paragraph chunks to return
+            min_similarity: Minimum similarity threshold (auto-tuned based on content quality)
+            max_sections: Maximum sections (scales with document size)
+            max_subsections: Maximum subsections (scales with document size)
             
         Returns:
             Tuple of (extracted_sections, subsection_analysis)
@@ -44,26 +46,26 @@ class DocumentRanker:
         
         self.logger.info(f"Ranking {len(headings)} headings and {len(paragraphs)} paragraphs")
         
-        # Rank headings for extracted_sections
-        extracted_sections = self._rank_headings(query, headings, top_sections)
+        extracted_sections = self._rank_headings(query, headings, min_similarity, max_sections)
         
-        # Rank paragraphs for subsection_analysis
-        subsection_analysis = self._rank_paragraphs(query, paragraphs, top_subsections)
+        subsection_analysis = self._rank_paragraphs(query, paragraphs, min_similarity, max_subsections)
         
         return extracted_sections, subsection_analysis
     
     def _rank_headings(self, query: str, headings: List[Dict[str, Any]], 
-                      top_k: int) -> List[Dict[str, Any]]:
+                      min_similarity: float, max_results: int) -> List[Dict[str, Any]]:
         """
         Rank heading chunks for extracted_sections output format.
+        Uses similarity threshold to include all relevant headings.
         
         Args:
             query: Search query
             headings: List of heading chunks to rank
-            top_k: Number of top chunks to return
+            min_similarity: Minimum similarity threshold to include content
+            max_results: Maximum number of results to prevent overwhelming output
             
         Returns:
-            List of top-k ranked headings in output schema format
+            List of ranked headings above similarity threshold in output schema format
         """
         if not headings:
             return []
@@ -81,27 +83,38 @@ class DocumentRanker:
                 chunk_embeddings
             )[0]
             
-            # Create ranked results
+            # Create ranked results with relevance boosting
             ranked_chunks = []
             for i, similarity in enumerate(similarities):
                 chunk = headings[i].copy()
-                chunk['similarity'] = float(similarity)
+                # Apply content relevance boost
+                boost = self._calculate_content_relevance_boost(chunk['text'], query)
+                boosted_similarity = min(1.0, similarity + boost)
+                chunk['similarity'] = float(boosted_similarity)
+                chunk['original_similarity'] = float(similarity)
+                chunk['relevance_boost'] = float(boost)
                 ranked_chunks.append(chunk)
             
             # Sort by similarity score (descending)
             ranked_chunks.sort(key=lambda x: x['similarity'], reverse=True)
             
-            # Return top-k results in schema format
-            result = []
-            for rank, chunk in enumerate(ranked_chunks[:top_k], 1):
-                result.append({
-                    'document': chunk.get('document', 'unknown.pdf'),
-                    'section_title': chunk['text'],
-                    'importance_rank': rank,
-                    'page_number': chunk['page']
-                })
+            # Intelligent filtering: adjust threshold based on content quality distribution
+            adjusted_threshold = self._adjust_similarity_threshold(similarities, min_similarity, content_type="heading")
             
-            self.logger.debug(f"Ranked {len(headings)} headings, returning top {len(result)}")
+            # Filter by adjusted similarity threshold and apply max limit
+            result = []
+            rank = 1
+            for chunk in ranked_chunks:
+                if chunk['similarity'] >= adjusted_threshold and len(result) < max_results:
+                    result.append({
+                        'document': chunk.get('document', 'unknown.pdf'),
+                        'section_title': chunk['text'],
+                        'importance_rank': rank,
+                        'page_number': chunk['page']
+                    })
+                    rank += 1
+            
+            self.logger.info(f"Ranked {len(headings)} headings, returning {len(result)} above adjusted threshold {adjusted_threshold:.3f}")
             return result
             
         except Exception as e:
@@ -109,23 +122,24 @@ class DocumentRanker:
             return []
     
     def _rank_paragraphs(self, query: str, paragraphs: List[Dict[str, Any]], 
-                        top_k: int) -> List[Dict[str, Any]]:
+                        min_similarity: float, max_results: int) -> List[Dict[str, Any]]:
         """
         Rank paragraph chunks for subsection_analysis output format.
+        Uses similarity threshold to include all relevant paragraphs.
         
         Args:
             query: Search query
             paragraphs: List of paragraph chunks to rank
-            top_k: Number of top chunks to return
+            min_similarity: Minimum similarity threshold to include content
+            max_results: Maximum number of results to prevent overwhelming output
             
         Returns:
-            List of top-k ranked paragraphs in output schema format
+            List of ranked paragraphs above similarity threshold in output schema format
         """
         if not paragraphs:
             return []
         
         try:
-            # Extract text content
             texts = [chunk['text'] for chunk in paragraphs]
             
             # Generate embeddings for query and chunks
@@ -138,31 +152,125 @@ class DocumentRanker:
                 chunk_embeddings
             )[0]
             
-            # Create ranked results
+            # Create ranked results with relevance boosting
             ranked_chunks = []
             for i, similarity in enumerate(similarities):
                 chunk = paragraphs[i].copy()
-                chunk['similarity'] = float(similarity)
+                # Apply content relevance boost
+                boost = self._calculate_content_relevance_boost(chunk['text'], query)
+                boosted_similarity = min(1.0, similarity + boost)
+                chunk['similarity'] = float(boosted_similarity)
+                chunk['original_similarity'] = float(similarity)
+                chunk['relevance_boost'] = float(boost)
                 ranked_chunks.append(chunk)
             
             # Sort by similarity score (descending)
             ranked_chunks.sort(key=lambda x: x['similarity'], reverse=True)
             
-            # Return top-k results in schema format
-            result = []
-            for chunk in ranked_chunks[:top_k]:
-                result.append({
-                    'document': chunk.get('document', 'unknown.pdf'),
-                    'refined_text': chunk['text'],
-                    'page_number': chunk['page']
-                })
+            # Intelligent filtering: adjust threshold based on content quality distribution - more lenient for paragraphs
+            adjusted_threshold = self._adjust_similarity_threshold(similarities, min_similarity, content_type="paragraph")
             
-            self.logger.debug(f"Ranked {len(paragraphs)} paragraphs, returning top {len(result)}")
+            # Filter by adjusted similarity threshold and apply max limit
+            result = []
+            for chunk in ranked_chunks:
+                if chunk['similarity'] >= adjusted_threshold and len(result) < max_results:
+                    result.append({
+                        'document': chunk.get('document', 'unknown.pdf'),
+                        'refined_text': chunk['text'],
+                        'page_number': chunk['page']
+                    })
+            
+            self.logger.info(f"Ranked {len(paragraphs)} paragraphs, returning {len(result)} above adjusted threshold {adjusted_threshold:.3f}")
             return result
             
         except Exception as e:
             self.logger.error(f"Error ranking paragraphs: {e}")
             return []
+    
+    def _adjust_similarity_threshold(self, similarities: np.ndarray, base_threshold: float, content_type: str = "heading") -> float:
+        """
+        Intelligently adjust similarity threshold based on content quality distribution.
+        Paragraphs get more lenient thresholds since they naturally score lower than headings.
+        
+        Args:
+            similarities: Array of similarity scores
+            base_threshold: Base threshold to start from
+            content_type: Type of content ("heading" or "paragraph")
+            
+        Returns:
+            Adjusted threshold for high-quality content selection
+        """
+        if len(similarities) == 0:
+            return base_threshold
+        
+        # Calculate statistics about similarity distribution
+        mean_sim = np.mean(similarities)
+        std_sim = np.std(similarities)
+        max_sim = np.max(similarities)
+        median_sim = np.median(similarities)
+        
+        # Adjust base threshold for paragraph content (naturally scores lower)
+        if content_type == "paragraph":
+            base_threshold = max(0.25, base_threshold - 0.05)  # More lenient for paragraphs
+        
+        # More threshold adjustment
+        if max_sim > 0.6:
+            # If high-quality content available - be more selective
+            # Use 75th percentile or mean + 0.5*std, whichever is higher
+            percentile_75 = np.percentile(similarities, 75)
+            statistical_threshold = mean_sim + 0.5 * std_sim
+            adjusted = max(base_threshold, min(percentile_75, statistical_threshold))
+        elif max_sim < 0.4:
+            # If lower quality content - be more inclusive but still maintain standards
+            adjusted = max(0.22, base_threshold - 0.05)
+        else:
+            # Normal case: use median-based approach for robustness
+            if content_type == "paragraph":
+                adjusted = max(base_threshold, median_sim) 
+            else:
+                adjusted = max(base_threshold, median_sim + 0.05)
+        
+        # Ensure reasonable bounds - more lenient for paragraphs
+        if content_type == "paragraph":
+            adjusted = max(0.22, min(0.6, adjusted))
+        else:
+            adjusted = max(0.25, min(0.65, adjusted))
+        
+        return adjusted
+    
+    def _calculate_content_relevance_boost(self, text: str, query: str) -> float:
+        """
+        Calculate additional relevance boost based on content quality indicators.
+        """
+        text_lower = text.lower()
+        query_lower = query.lower()
+        boost = 0.0
+        
+        # Extract key terms from query
+        query_terms = [term.strip().lower() for term in query_lower.split(':')[-1].split()]
+        
+        # Boost for exact keyword matches
+        for term in query_terms:
+            if len(term) > 3 and term in text_lower:
+                boost += 0.05
+        
+        # Boost for complete sentences (quality indicator)
+        sentence_count = text.count('.') + text.count('!') + text.count('?')
+        if sentence_count >= 1 and len(text) > 50:
+            boost += 0.03
+        
+        # Boost for actionable content (contains verbs/instructions)
+        action_words = ['create', 'make', 'fill', 'sign', 'complete', 'manage', 'use', 'add', 'select']
+        action_count = sum(1 for word in action_words if word in text_lower)
+        boost += min(0.05, action_count * 0.01)
+        
+        # Boost for specific domain terms
+        if 'hr professional' in query_lower or 'human resources' in query_lower:
+            hr_terms = ['employee', 'onboarding', 'compliance', 'workflow', 'process', 'documentation']
+            hr_count = sum(1 for term in hr_terms if term in text_lower)
+            boost += min(0.04, hr_count * 0.01)
+        
+        return min(0.15, boost)  # Limiting total boost at 0.15
     
     def _rank_chunk_type(self, query: str, chunks: List[Dict[str, Any]], 
                         top_k: int) -> List[Dict[str, Any]]:
@@ -181,7 +289,6 @@ class DocumentRanker:
             return []
         
         try:
-            # Extract text content
             texts = [chunk['text'] for chunk in chunks]
             
             # Generate embeddings for query and chunks
@@ -203,11 +310,10 @@ class DocumentRanker:
             
             # Sort by similarity score (descending)
             ranked_chunks.sort(key=lambda x: x['score'], reverse=True)
-            
-            # Return top-k results
+
+            # Return top ranked results
             top_chunks = ranked_chunks[:top_k]
             
-            # Format output (remove type field, keep text, page, score)
             result = []
             for chunk in top_chunks:
                 result.append({
